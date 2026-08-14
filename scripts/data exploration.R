@@ -2,6 +2,7 @@ library(readxl)
 library(tidyverse)
 library(janitor)
 library(ggridges)
+library(ggrepel)
 
 
 #read in NW data
@@ -81,6 +82,52 @@ all |> group_by(year, center, pool) |>
             n = n()) |>
   arrange(center, year) %>% 
   as.data.frame()
+
+#Can we estimate what the 70-30 cutoff was based on RIF credits?
+rif_cutoff <- all |> 
+  group_by(year, center, path) |> 
+  summarise(
+    highest_5 = max(score[rif == 5]),
+    lowest_10 = min(score[rif == 10]),
+    .groups = "drop"
+  )
+#Potentially something a bit funky with NWFSC ZA/ZP rif credits in 2024 IF they should be considered the same pool
+
+ggplot(rif_cutoff |> filter(!is.na(highest_5)), aes(y = factor(year))) +
+  # Draw the connecting gap segment
+  geom_segment(aes(x = highest_5, xend = lowest_10, yend = factor(year)), 
+               color = "grey60", linewidth = 1) +
+  # Point for highest 5 RIF
+  geom_point(aes(x = highest_5, color = "Highest RIF 5"), size = 3) +
+  # Point for lowest 10 RIF
+  geom_point(aes(x = lowest_10, color = "Lowest RIF 10"), size = 3) +
+  facet_grid(center ~ path) +
+  scale_color_manual(values = c("Highest RIF 5" = "#2b5c8f", "Lowest RIF 10" = "#d95f02")) +
+  labs(
+    title = "Estimated 70-30 Cutoff",
+    x = "Score Boundary",
+    y = "Year",
+    color = "Cutoff Marker"
+  ) +
+  geom_text_repel(
+    aes(x = highest_5, label = round(highest_5, 1)),
+    nudge_x = -0.5,
+    direction = "x",
+    size = 3.2,
+    fontface = "bold",
+    segment.color = NA # Hides leader lines
+  ) +
+  
+  # Repelled Labels for RIF 10 (pushed right)
+  geom_text_repel(
+    aes(x = lowest_10, label = round(lowest_10, 1)),
+    nudge_x = 0.5,
+    direction = "x",
+    size = 3.2,
+    fontface = "bold",
+    segment.color = NA
+  )+
+  theme_minimal()
 
 #check to see whether the raises, RIF credits seem to fall along the 70-30 split
 #note that managers in the pool are not included in our dataset, so the quantile calculations only reflect BU employees
