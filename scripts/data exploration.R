@@ -3,6 +3,7 @@ library(tidyverse)
 library(janitor)
 library(ggridges)
 library(ggrepel)
+library(mgcv)
 
 
 #read in NW data
@@ -46,11 +47,20 @@ all <- bind_rows(nw24, nw25, ak24, ak25) |>
                                            performance_pay_increase)) |> #assuming blank means no increase at AFSC
   mutate(pool = ifelse(is.na(pool), 
                        path,  
-                       pool)) #assuming pool is path at AFSC, but we should check
-
+                       pool)) |> #assuming pool is path at AFSC, but we should check
+  mutate(in_top_30 = ifelse(rif == 10, 1, 0)) |> #categorical variable for whether score was in the top 30th based on RIF credits
 #Also keep separate AK/NW data
-nw <- filter(all, center == "NWFSC")
-ak <- filter(all, center == "AFSC")
+  mutate(
+    year = factor(year, levels = c("FY24", "FY25")),
+    path = factor(path),
+    year_top30 = interaction(year, in_top_30, drop = TRUE)
+  )
+
+nw <- filter(all, center == "NWFSC") |>
+  mutate(got_raise = ifelse(performance_pay_increase > 0, 1, 0))
+
+ak <- filter(all, center == "AFSC") |>
+  mutate(got_raise = ifelse(percent_increase > 0, 1, 0))
 
 #summary stats by year/center
 all |> group_by(year, center) |>
@@ -171,4 +181,19 @@ ggplot(ak, aes(x = score, y = percent_increase, color = year, group = year))+
 
 nwfsc_pay_mod <- aov(performance_pay_increase ~ score + year, data = nw) 
 nwfsc_bonus_mod <- aov(bonus ~ score + year, data = nw)
+
+afsc_pay_mod <- aov(percent_increase ~ score + year, data = ak)
+afsc_bonus_mod <- aov(bonus ~ score + year, data = ak) 
+
+#anova probably not the best model. What about a hurdle model? GAM?
+nw_binom <- gam(
+  got_raise ~
+    year * in_top_30 +
+    s(score, by = interaction(year, in_top_30), k = 6) +
+    s(path, bs = "re"),
+  family = binomial(link = "logit"),
+  data = nw,
+  method = "REML"
+)
+
 
