@@ -1,0 +1,44 @@
+---
+title: "FY24 and FY25 CAPS"
+author: "IFPTE 8a"
+format: html
+editor: visual
+execute:
+  dir: project
+---
+
+## Background
+
+IFPTE 8a requested data on FY2024 and FY2025 CAPS scores, bonuses, RIF credits and performance pay increases from management to inform how recent changes have impacted scoring and compensation for bargaining unit members. This document summarizes the data we received.
+
+## Data Prep
+
+```{r}
+#| message: false
+#| warning: false
+library(readxl)
+library(tidyverse)
+library(janitor)
+library(ggridges)
+library(ggrepel)
+library(mgcv)
+library(here)
+```
+
+## Analysis
+
+```{r}
+#read in NW data
+nw24 <- read_xlsx(here("data", "NWFSC FY24 FY25 CAPS data Union request April 2026.xlsx"), sheet = "FY24")|>
+  clean_names() |>
+  mutate(year = "FY24") |>
+  rename(score = fy24_score,
+         rif = rif_credit) |>
+  mutate(center = "NWFSC")
+
+nw25 <- read_xlsx(here("data", "NWFSC FY24 FY25 CAPS data Union request April 2026.xlsx"), sheet = "FY25")|>
+  clean_names() |>
+  mutate(year = "FY25") |>
+  rename(score = fy25_score) |>
+  mutate(center = "NWFSC")
+```
