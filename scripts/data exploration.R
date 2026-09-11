@@ -54,7 +54,13 @@ all <- bind_rows(nw24, nw25, ak24, ak25) |>
     year = factor(year, levels = c("FY24", "FY25")),
     path = factor(path),
     year_top30 = interaction(year, in_top_30, drop = TRUE)
-  )
+  ) |> 
+  #how many people do we have in these categories?
+  group_by(center, year, path) |> 
+  mutate(n_in_path = n()) |> 
+  group_by(center, year, pool) |> 
+  mutate(n_in_pool = n()) |> 
+  ungroup()
 
 nw <- filter(all, center == "NWFSC") |>
   mutate(got_raise = ifelse(performance_pay_increase > 0, 1, 0))
@@ -63,38 +69,47 @@ ak <- filter(all, center == "AFSC") |>
   mutate(got_raise = ifelse(percent_increase > 0, 1, 0))
 
 #summary stats by year/center
-all |> group_by(year, center) |>
-  summarise(quant70 = quantile(score, .7),
-            mean_score = mean(score),
+summary_by_center_year <- all |> 
+  group_by(year, center) |>
+  summarise(#quant70 = quantile(score, .7),
+            mean_score = round(mean(score),1),
             med_score = median(score),
-            mean_bonus = mean(bonus),
+            mean_bonus = round(mean(bonus), 1),
             med_bonus = median(bonus),
-            mean_inc = mean(performance_pay_increase),
-            med_inc = median(performance_pay_increase),
+            mean_absolute_inc = round(mean(performance_pay_increase),1),
+            med_absolute_inc = median(performance_pay_increase),
+            mean_pct_inc = round(mean(percent_increase), 1),
+            med_pct_inc = median(percent_increase),
             total_bonus = sum(bonus),
             total_inc = sum(performance_pay_increase),
-            prop_5rif = sum(rif == 5)/n(),
-            prop_10rif = sum(rif == 10)/n())
+            prop_5rif = round(sum(rif == 5)/n(),2),
+            prop_10rif = round(sum(rif == 10)/n(),2)) |> 
+  arrange(center, year) |> 
+  as.data.frame()
 
 #summary stats by year/center/paypool
-all |> group_by(year, center, pool) |>
-  summarise(quant70 = quantile(score, 0.7),
-            mean_score = mean(score),
+summary_by_center_year_path <- all |> 
+  filter(n_in_path >= 3) |> 
+  group_by(year, center, path) |>
+  summarise(#quant70 = quantile(score, 0.7),
+            mean_score = round(mean(score),1),
             med_score = median(score),
-            mean_bonus = mean(bonus),
+            mean_bonus = round(mean(bonus),1),
             med_bonus = median(bonus),
-            mean_inc = mean(performance_pay_increase),
-            med_inc = median(performance_pay_increase),
+            mean_absolute_inc = mean(performance_pay_increase),
+            med_absolute_inc = median(performance_pay_increase),
+            mean_pct_inc = round(mean(percent_increase),1),
+            med_pct_inc = median(percent_increase),
             total_bonus = sum(bonus),
             total_inc = sum(performance_pay_increase),
-            prop_5rif = sum(rif == 5)/n(),
-            prop_10rif = sum(rif == 10)/n(),
-            n = n()) |>
-  arrange(center, year) %>% 
+            prop_5rif = round(sum(rif == 5)/n(),2),
+            prop_10rif = round(sum(rif == 10)/n(),2)) |>
+  arrange(center, year, path) %>% 
   as.data.frame()
 
 #Can we estimate what the 70-30 cutoff was based on RIF credits?
 rif_cutoff <- all |> 
+  filter(n_in_path >= 3) |> 
   group_by(year, center, path) |> 
   summarise(
     highest_5 = max(score[rif == 5]),
@@ -169,12 +184,25 @@ ggplot(bind_rows(ak24, ak25), aes(x = score, y = year))+
   geom_density_ridges2(quantile_lines =TRUE)+
   ggtitle("AFSC")
 
+ggplot(all |>  filter(n_in_path >= 3), aes(x = score, y = year))+
+  geom_density_ridges2(quantile_lines =TRUE)+
+  facet_grid(path~center)+
+  theme_bw()+
+  ggtitle("Distribution of scores by center and path")
+
 #plot score against pay increase
 ggplot(nw, aes(x = score, y = performance_pay_increase, color = year, group = year))+
   geom_point()
 
 ggplot(ak, aes(x = score, y = percent_increase, color = year, group = year))+
   geom_point()
+
+#plot score against pay increase BUT use smooth insread of points
+ggplot(nw, aes(x = score, y = performance_pay_increase, color = year, group = year))+
+  geom_smooth()
+
+ggplot(ak, aes(x = score, y = percent_increase, color = year, group = year))+
+  geom_smooth()
 
 #median? bonus/raise for a given score across years. what kind of a hit do you expect to get for a given score?
 #ANCOVA bonus ~ score + year
@@ -185,7 +213,7 @@ nwfsc_bonus_mod <- aov(bonus ~ score + year, data = nw)
 afsc_pay_mod <- aov(percent_increase ~ score + year, data = ak)
 afsc_bonus_mod <- aov(bonus ~ score + year, data = ak) 
 
-#anova probably not the best model. What about a hurdle model? GAM?
+#linear probably not the best model. What about a hurdle model? GAM?
 nw_binom <- gam(
   got_raise ~
     year * in_top_30 +
@@ -195,5 +223,6 @@ nw_binom <- gam(
   data = nw,
   method = "REML"
 )
+#this doesn't really make sense
 
 

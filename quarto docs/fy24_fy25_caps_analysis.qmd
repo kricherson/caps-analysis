@@ -21,13 +21,32 @@ library(tidyverse)
 library(janitor)
 library(ggridges)
 library(ggrepel)
-library(mgcv)
 library(here)
+library(knitr)
 ```
 
-## Analysis
+## Data import and cleaning
+
+We have anonymized data for all bargaining unit members from the AFSC and NWFSC from FY2024 and FY2025. The AFSC data includes path, band, score, performance pay increase (percent), bonus, and RIF credits (FY25 only). The NWFSC data include path, band score, performance pay increase (absolute numbers), bonus, RIF credits, and pool. For the NWFSC, the pool for ZA and ZP is ZA/ZP (still unclear what this means).
 
 ```{r}
+#| message: false
+#| warning: false
+#Read in AK data
+#note: no info on RIF credits for AK 2024
+#note: no "pool" column
+ak24 <- read_xlsx(here('data', 'FY24 and FY25 AKC CAPS Information for IFPTE Request.xlsm'), sheet = "AKC FY24") |>
+  clean_names() |>
+  mutate(year = "FY24") |>
+  mutate(center = "AFSC") |> 
+  mutate(percent_increase = percent_increase*100) #this is getting read in as a proportion, quick fix
+
+ak25 <- read_xlsx(here('data','FY24 and FY25 AKC CAPS Information for IFPTE Request.xlsm'), sheet = "AKC FY25") |>
+  clean_names() |>
+  mutate(year = "FY25") |>
+  rename(rif = rif_credit) |>
+  mutate(center = "AFSC")
+
 #read in NW data
 nw24 <- read_xlsx(here("data", "NWFSC FY24 FY25 CAPS data Union request April 2026.xlsx"), sheet = "FY24")|>
   clean_names() |>
@@ -41,4 +60,115 @@ nw25 <- read_xlsx(here("data", "NWFSC FY24 FY25 CAPS data Union request April 20
   mutate(year = "FY25") |>
   rename(score = fy25_score) |>
   mutate(center = "NWFSC")
+
+#Combine all together 
+all <- bind_rows(nw24, nw25, ak24, ak25) |>
+  select(-x1) |>
+  mutate(percent_increase = ifelse(is.na(percent_increase) & center == "AFSC",
+                                   0,
+                                   percent_increase),
+         performance_pay_increase = ifelse(is.na(performance_pay_increase) & center == "NWFSC",
+                                           0,
+                                           performance_pay_increase)) |> #assuming blank means no increase at AFSC
+  mutate(pool = ifelse(is.na(pool), 
+                       path,  
+                       pool)) |> #assuming pool is path at AFSC, but we should check
+  mutate(in_top_30 = ifelse(rif == 10, 1, 0)) |> #categorical variable for whether score was in the top 30th based on RIF credits
+  #Also keep separate AK/NW data
+  mutate(
+    year = factor(year, levels = c("FY24", "FY25")),
+    path = factor(path),
+    year_top30 = interaction(year, in_top_30, drop = TRUE)
+  ) |> 
+  #how many people do we have in these categories?
+  group_by(center, year, path) |> 
+  mutate(n_in_path = n()) |> 
+  group_by(center, year, pool) |> 
+  mutate(n_in_pool = n()) |> 
+  ungroup()
+
+nw <- filter(all, center == "NWFSC") |>
+  mutate(got_raise = ifelse(performance_pay_increase > 0, 1, 0))
+
+ak <- filter(all, center == "AFSC") |>
+  mutate(got_raise = ifelse(percent_increase > 0, 1, 0))
 ```
+
+## Analysis
+
+We did a brief comparison of the distribution of scores, the scores associated with 5 or 10 RIF credits (which should correspond to being in the lower 70th or upper 30th percentile of the pay pool), and the relationship between score and performance increase. \[add something about total bonuses and raises by the center here\]
+
+```{r}
+#summary stats by year/center/path
+summary_by_center_year_path <- all |> 
+  filter(n_in_path >= 3) |> 
+  group_by(year, center, path) |>
+  summarise(#quant70 = quantile(score, 0.7),
+    mean_score = round(mean(score),1),
+    med_score = median(score),
+    mean_bonus = round(mean(bonus),1),
+    med_bonus = median(bonus),
+    mean_absolute_inc = mean(performance_pay_increase),
+    med_absolute_inc = median(performance_pay_increase),
+    mean_pct_inc = round(mean(percent_increase),1),
+    med_pct_inc = median(percent_increase),
+    total_bonus = sum(bonus),
+    total_inc = sum(performance_pay_increase),
+    prop_5rif = round(sum(rif == 5)/n(),2),
+    prop_10rif = round(sum(rif == 10)/n(),2)) |>
+  arrange(center, path, year) |> 
+  as.data.frame()
+
+kable(summary_by_center_year_path, caption = "Summary Statistics by Center, Year, and Path")
+```
+
+```{r}
+#Can we estimate what the 70-30 cutoff was based on RIF credits?
+rif_cutoff <- all |> 
+  filter(n_in_path >= 3) |> 
+  group_by(year, center, path) |> 
+  summarise(
+    highest_5 = max(score[rif == 5]),
+    lowest_10 = min(score[rif == 10]),
+    .groups = "drop"
+  )
+#Potentially something a bit funky with NWFSC ZA/ZP rif credits in 2024 IF they should be considered the same pool
+
+ggplot(rif_cutoff |> filter(!is.na(highest_5)), aes(y = factor(year))) +
+  # Draw the connecting gap segment
+  geom_segment(aes(x = highest_5, xend = lowest_10, yend = factor(year)), 
+               color = "grey60", linewidth = 1) +
+  # Point for highest 5 RIF
+  geom_point(aes(x = highest_5, color = "Highest RIF 5"), size = 3) +
+  # Point for lowest 10 RIF
+  geom_point(aes(x = lowest_10, color = "Lowest RIF 10"), size = 3) +
+  facet_grid(center ~ path) +
+  scale_color_manual(values = c("Highest RIF 5" = "blue", "Lowest RIF 10" = "red")) +
+  labs(
+    title = "Estimated 70-30 Cutoff",
+    x = "Score Boundary",
+    y = "Year",
+    color = "Cutoff Marker"
+  ) +
+  geom_text_repel(
+    aes(x = highest_5, label = round(highest_5, 1)),
+    nudge_x = -0.5,
+    direction = "x",
+    size = 3.2,
+    segment.color = NA 
+  ) +
+  
+  # Repelled Labels for RIF 10 (pushed right)
+  geom_text_repel(
+    aes(x = lowest_10, label = round(lowest_10, 1)),
+    nudge_x = 0.5,
+    direction = "x",
+    size = 3.2,
+    segment.color = NA
+  )+
+  theme_bw()
+```
+
+## Additional context
+
+Variation in how bonuses are doled out, leveling, etc.
