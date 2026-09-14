@@ -5,13 +5,13 @@ format: html
 editor: visual
 execute:
   dir: project
+  cache: true
+  echo: false
 ---
 
 ## Background
 
 IFPTE 8a requested data on FY2024 and FY2025 CAPS scores, bonuses, RIF credits and performance pay increases from management to inform how recent changes have impacted scoring and compensation for bargaining unit members. This document summarizes the data we received.
-
-## Data Prep
 
 ```{r}
 #| message: false
@@ -96,7 +96,7 @@ ak <- filter(all, center == "AFSC") |>
 
 ## Analysis
 
-We did a brief comparison of the distribution of scores, the scores associated with 5 or 10 RIF credits (which should correspond to being in the lower 70th or upper 30th percentile of the pay pool), and the relationship between score and performance increase. \[add something about total bonuses and raises by the center here\]
+We did a brief comparison of the distribution of scores, the scores associated with 5 or 10 RIF credits (which should correspond to being in the lower 70th or upper 30th percentile of the pay pool), and the relationship between score and performance increase. For all analyses, any year/center/path combination with fewer than three employees are not shown to avoid inadvertently revealing any identifying information. Table 1 shows a summary of the information provided by year, center, and path.
 
 ```{r}
 #summary stats by year/center/path
@@ -114,16 +114,36 @@ summary_by_center_year_path <- all |>
     med_pct_inc = median(percent_increase),
     total_bonus = sum(bonus),
     total_inc = sum(performance_pay_increase),
-    prop_5rif = round(sum(rif == 5)/n(),2),
-    prop_10rif = round(sum(rif == 10)/n(),2)) |>
+    pct_5rif = round(sum(rif == 5)/n(),2)*100,
+    pct_10rif = round(sum(rif == 10)/n(),2)*100, 
+    .groups = "drop_last") |>
   arrange(center, path, year) |> 
   as.data.frame()
 
-kable(summary_by_center_year_path, caption = "Summary Statistics by Center, Year, and Path")
+summary_by_year_center <- all |> 
+  group_by(year, center) |> 
+  summarise(total_bonus = sum(bonus),
+            total_increase = sum(performance_pay_increase),
+            pct_10_rif = round(sum(rif == 10)/n(),2)*100,
+            mean_pct_increase = round(mean(percent_increase),1),
+            med_pct_increase = round(median(percent_increase),1),
+            .groups = "drop_last")
+
 ```
 
 ```{r}
-#Can we estimate what the 70-30 cutoff was based on RIF credits?
+#| label: tbl-summary
+#| tbl-cap: "Summary of bonuses, performance pay increases, and RIF credits by path, year, and center"
+kable(summary_by_center_year_path)
+```
+
+At the NWFSC, bonuses totaled \$`r format(subset(summary_by_year_center, center == "NWFSC" & year == "FY24")$total_bonus, big.mark=",")` in FY24 and \$`r format(subset(summary_by_year_center, center == "NWFSC" & year == "FY25")$total_bonus, big.mark=",")` in FY25. At the AFSC, bonuses totaled \$`r format(subset(summary_by_year_center, center == "AFSC" & year == "FY24")$total_bonus, big.mark=",")` in FY24 and \$`r format(subset(summary_by_year_center, center == "AFSC" & year == "FY25")$total_bonus, big.mark=",")` in FY25. At the NWFSC, performance pay increases totaled \$`r format(subset(summary_by_year_center, center == "NWFSC" & year == "FY24")$total_increase, big.mark=",")` in FY24 and \$`r format(subset(summary_by_year_center, center == "NWFSC" & year == "FY25")$total_increase, big.mark=",")` in FY25. The AFSC provided performance pay data in percents, and the median performance pay increase was `r format(subset(summary_by_year_center, center == "AFSC" & year == "FY24")$med_pct_increase, big.mark=",")`% in FY2024 and `r format(subset(summary_by_year_center, center == "AFSC" & year == "FY25")$med_pct_increase, big.mark=",")`% in FY2025. At the NWFSC, `r format(subset(summary_by_year_center, center == "NWFSC" & year == "FY24")$pct_10_rif, big.mark=",")`% of bargaining unit employees were given 10 RIF credits in both FY24 and FY25, corresponding to the percent of employees who were in the top 30th percentile of their respective pay pools. At the AFSC, this number was `r format(subset(summary_by_year_center, center == "AFSC" & year == "FY25")$pct_10_rif, big.mark=",")`% in FY25 (data for FY24 not provided).
+
+We used the maximum scores with 5 RIF credits and the minimum scores with 10 RIF credits to estimate the scores associated with the 70th/30th percentile of scores in a pay pool. Figure 1 shows these scores for each path, center, and year.
+
+```{r}
+#| label: fig-rif_cutoff
+#| fig-cap: "Maximum score with 5 RIF credits (assumed lower 70th percentile) and minimum score with 10 RIF credits (assumed upper 30th percentile)"
 rif_cutoff <- all |> 
   filter(n_in_path >= 3) |> 
   group_by(year, center, path) |> 
@@ -139,16 +159,16 @@ ggplot(rif_cutoff |> filter(!is.na(highest_5)), aes(y = factor(year))) +
   geom_segment(aes(x = highest_5, xend = lowest_10, yend = factor(year)), 
                color = "grey60", linewidth = 1) +
   # Point for highest 5 RIF
-  geom_point(aes(x = highest_5, color = "Highest RIF 5"), size = 3) +
+  geom_point(aes(x = highest_5, color = "Highest RIF 5 score"), size = 3) +
   # Point for lowest 10 RIF
-  geom_point(aes(x = lowest_10, color = "Lowest RIF 10"), size = 3) +
+  geom_point(aes(x = lowest_10, color = "Lowest RIF 10 score"), size = 3) +
   facet_grid(center ~ path) +
-  scale_color_manual(values = c("Highest RIF 5" = "blue", "Lowest RIF 10" = "red")) +
+  scale_color_manual(values = c("Highest RIF 5 score" = "blue", "Lowest RIF 10 score" = "red")) +
   labs(
     title = "Estimated 70-30 Cutoff",
-    x = "Score Boundary",
+    x = "Score",
     y = "Year",
-    color = "Cutoff Marker"
+    color = ""
   ) +
   geom_text_repel(
     aes(x = highest_5, label = round(highest_5, 1)),
@@ -166,6 +186,48 @@ ggplot(rif_cutoff |> filter(!is.na(highest_5)), aes(y = factor(year))) +
     size = 3.2,
     segment.color = NA
   )+
+  theme_bw()
+```
+
+The overall distribution of scores is shown in Figure 2.
+
+```{r}
+#| message: false
+#| warning: false
+#| label: fig-score-ridgeplot
+#| fig-cap: "Density plot of scores by year, center, and path. Vertical lines represent quantiles."
+
+ggplot(all |>  filter(n_in_path >= 3), aes(x = score, y = year))+
+  geom_density_ridges2(quantile_lines =TRUE)+
+  facet_grid(path~center)+
+  theme_bw()+
+  ggtitle("Distribution of scores")
+
+```
+
+The smoothed relationship between score and performance pay increase is shown in Figures 3 and 4. Individual scores are not shown in order to avoid inadvertently revealing personal information. Note that we do not have information on which employees are at the top of their pay band ("capped out").
+
+```{r}
+#| message: false
+#| warning: false
+#| label: fig-nw_score_perf_pay
+#| fig-cap: "Smoothed plot of score versus performance pay increase (NWFSC)."
+ggplot(nw, aes(x = score, y = performance_pay_increase, color = year, group = year))+
+  geom_smooth()+
+  ylab("Performance pay increase (dollars)")+
+  #facet_wrap(~path)+
+  theme_bw()
+```
+
+```{r}
+#| message: false
+#| warning: false
+#| label: fig-ak_score_perf_pay
+#| fig-cap: "Smoothed plot of score versus performance pay increase (AFSC)."
+ggplot(ak, aes(x = score, y = percent_increase, color = year, group = year))+
+  geom_smooth()+
+  #facet_wrap(~path)+
+  ylab("Performance pay increase (%)")+
   theme_bw()
 ```
 
